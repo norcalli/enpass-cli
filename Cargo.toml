@@ -1,0 +1,19 @@
+cargo-features = ["edition"]
+
+[package]
+name = "enpass-cli"
+version = "0.1.0"
+authors = ["Ashkan Kiani <ashkan@zephyr>"]
+edition = "2018"
+
+[dependencies]
+time = "0.1.40"
+rusqlcipher = { version = "0.14.9", features = ["sqlcipher"] }
+rust-crypto = "0.2.36"
+serde = "1.0.75"
+serde_json = "1.0.26"
+serde_derive = "1.0.75"
+log = "0.4.4"
+env_logger = "0.5.13"
+failure = "0.1.2"
+structopt = "0.2.10"
