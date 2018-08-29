@@ -5,6 +5,10 @@ name = "enpass-cli"
 version = "0.1.0"
 authors = ["Ashkan Kiani <ashkan@zephyr>"]
 edition = "2018"
+license = "Apache-2.0"
+description = "A cli interface to decrypting the enpass database"
+homepage = "https://github.com/norcalli/enpass-cli"
+repository = "https://github.com/norcalli/enpass-cli"
 
 [dependencies]
 time = "0.1.40"
