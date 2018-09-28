@@ -1,9 +1,10 @@
 use crypto::buffer::{ReadBuffer, WriteBuffer};
 use crypto::{aes, hmac::Hmac, pbkdf2::pbkdf2, sha2::Sha256};
-use rusqlcipher::Connection;
 use failure::*;
 use log::*;
+use rusqlcipher::Connection;
 use serde_derive::*;
+use std::io::Write;
 use structopt::*;
 
 #[derive(Debug)]
@@ -78,12 +79,6 @@ fn main() -> Result<(), Error> {
         "PRAGMA kdf_iter = 24000",
     ] {
         conn.prepare(statement)?.query(&[])?;
-        // conn.execute(statement, &[])?;
-        // conn.query_row_and_then(statement, &[], |row| -> Result<(), Box<Error>> {
-        //     let result: String = row.get(0);
-        //     eprintln!("{:?}", &result);
-        //     Ok(())
-        // })?;
     }
 
     let (key, iv) = {
@@ -112,33 +107,35 @@ fn main() -> Result<(), Error> {
 
     {
         let mut stmt = conn.prepare("SELECT id, uuid, title, subtitle, deleted, trashed, type, category, data FROM Cards ORDER BY title, trashed, deleted")?;
-        let cards: Result<Vec<Card>, Error> = stmt
-            .query_map(&[], |row| -> Result<_, Error> {
-                let data: Vec<u8> = row.get(8);
-                let decrypted = decrypt_enpass_data(&data, &key, &iv)?;
-                trace!("{}", &String::from_utf8(decrypted.clone())?);
-                let deserialized = serde_json::from_slice(&decrypted)?;
-                let card = Card {
-                    id: row.get(0),
-                    uuid: row.get(1),
-                    title: row.get(2),
-                    subtitle: row.get(3),
-                    deleted: row.get(4),
-                    trashed: row.get(5),
-                    r#type: row.get(6),
-                    category: row.get(7),
-                    data: deserialized,
-                };
-                Ok(card)
-            })?.flat_map(|x| x)
-            .collect();
 
-        let cards = cards?;
+        let mut stdout = std::io::stdout();
 
-        for card in &cards {
-            // std::assert_eq!(card.data.len() % 32, 0);
-            println!("{}", serde_json::to_string_pretty(card)?);
-        }
+        stmt.query_map(&[], |row| -> Result<_, Error> {
+            let data: Vec<u8> = row.get(8);
+            let decrypted = decrypt_enpass_data(&data, &key, &iv)?;
+            trace!("{}", &String::from_utf8(decrypted.clone())?);
+            let deserialized = serde_json::from_slice(&decrypted)?;
+            let card = Card {
+                id: row.get(0),
+                uuid: row.get(1),
+                title: row.get(2),
+                subtitle: row.get(3),
+                deleted: row.get(4),
+                trashed: row.get(5),
+                r#type: row.get(6),
+                category: row.get(7),
+                data: deserialized,
+            };
+            Ok(card)
+        })?.filter_map(|res| res.ok())
+        .filter_map(|res| res.ok())
+        .for_each(|card| {
+            writeln!(
+                stdout,
+                "{}",
+                serde_json::to_string(&card).expect("Failed to serialize")
+            ).expect("Failed to write");
+        });
     }
 
     Ok(())
