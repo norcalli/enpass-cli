@@ -1,6 +1,8 @@
 use crypto::buffer::{ReadBuffer, WriteBuffer};
-use crypto::{aes, hmac::Hmac, pbkdf2::pbkdf2, sha2::Sha256};
-use failure::*;
+use crypto::{
+    aes, hmac::Hmac, pbkdf2::pbkdf2, sha2::Sha256, symmetriccipher::SymmetricCipherError,
+};
+use derive_more::{Display, From};
 use log::*;
 use rusqlcipher::Connection;
 use serde_derive::*;
@@ -38,6 +40,19 @@ struct Opt {
 
     #[structopt(short = "p")]
     password: String,
+
+    #[structopt(short = "6")]
+    version_6: bool,
+}
+
+#[derive(Display, From, Debug)]
+enum Error {
+    #[display(fmt = "SymmetricCipherError")]
+    CryptoError(SymmetricCipherError),
+    #[display(fmt = "sqlcipher error: {}", "_0")]
+    SqlCipherError(rusqlcipher::Error),
+    SerdeJsonError(serde_json::Error),
+    UnsupportedEnpassVersion,
 }
 
 fn decrypt_enpass_data(input_data: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>, Error> {
@@ -54,7 +69,7 @@ fn decrypt_enpass_data(input_data: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u
     loop {
         let result = decryptor
             .decrypt(&mut read_buffer, &mut write_buffer, true)
-            .map_err(|err| format_err!("{:?}", err))?;
+            .map_err(Error::CryptoError)?;
         match result {
             crypto::buffer::BufferResult::BufferUnderflow => {
                 final_result.extend(write_buffer.take_read_buffer().take_remaining());
@@ -67,18 +82,44 @@ fn decrypt_enpass_data(input_data: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u
     }
 }
 
+const ENPASS5_PRAGMAS: &'static str = "PRAGMA cipher_page_size = 1024;\
+                                       PRAGMA kdf_iter = 24000;\
+                                       PRAGMA cipher_hmac_algorithm = HMAC_SHA1;\
+                                       PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA1;\
+                                       ";
+
+// const ENPASS6_PRAGMAS: &'static str = "
+// PRAGMA kdf_iter = 100000;
+// ";
+
+// const ENPASS6_PRAGMAS: &'static str = "PRAGMA cipher_compatibility = 3";
+
+// const ENPASS5_PRAGMAS: &[&'static str] = [
+//     "PRAGMA cipher_page_size = 1024",
+//     "PRAGMA kdf_iter = 24000",
+//     "PRAGMA cipher_hmac_algorithm = HMAC_SHA1",
+//     "PRAGMA cipher_kdf_algorithm = PBKDF2_HMAC_SHA1;",
+// ];
+
 fn main() -> Result<(), Error> {
     env_logger::init();
     let opt = Opt::from_args();
 
     let conn = Connection::open(opt.database)?;
 
-    for statement in &[
-        &format!("PRAGMA key = '{}'", &opt.password),
-        "PRAGMA cipher_default_kdf_iter = 24000",
-        "PRAGMA kdf_iter = 24000",
-    ] {
-        conn.prepare(statement)?.query(&[])?;
+    // https://www.zetetic.net/blog/2018/11/30/sqlcipher-400-release/
+    // Another option is PRAGMA cipher_compatibility = 3;
+    // https://discuss.zetetic.net/t/upgrading-to-sqlcipher-4/3283
+
+    conn.execute_batch(&format!("PRAGMA key = '{}'", &opt.password))?;
+    if opt.version_6 {
+        eprintln!("Enpass 6 is currently not supported.\n\
+        If you know the encryption format, please feel free to file an issue at https://github.com/norcalli/enpass-cli");
+
+        // conn.execute_batch(ENPASS6_PRAGMAS)?;
+        return Err(Error::UnsupportedEnpassVersion);
+    } else {
+        conn.execute_batch(ENPASS5_PRAGMAS)?;
     }
 
     let (key, iv) = {
@@ -113,7 +154,6 @@ fn main() -> Result<(), Error> {
         stmt.query_map(&[], |row| -> Result<_, Error> {
             let data: Vec<u8> = row.get(8);
             let decrypted = decrypt_enpass_data(&data, &key, &iv)?;
-            trace!("{}", &String::from_utf8(decrypted.clone())?);
             let deserialized = serde_json::from_slice(&decrypted)?;
             let card = Card {
                 id: row.get(0),
@@ -127,14 +167,16 @@ fn main() -> Result<(), Error> {
                 data: deserialized,
             };
             Ok(card)
-        })?.filter_map(|res| res.ok())
+        })?
+        .filter_map(|res| res.ok())
         .filter_map(|res| res.ok())
         .for_each(|card| {
             writeln!(
                 stdout,
                 "{}",
                 serde_json::to_string(&card).expect("Failed to serialize")
-            ).expect("Failed to write");
+            )
+            .expect("Failed to write");
         });
     }
 
