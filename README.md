@@ -1,5 +1,7 @@
 # `enpass-cli`
 
+[![crates.io](https://img.shields.io/crates/v/enpass-cli.svg?style=flat)](https://crates.io/crates/enpass-cli) [![docs.rs](https://docs.rs/enpass-cli/badge.svg)](https://docs.rs/enpass-cli)
+
 Developed on Linux, and therefore only tested on Linux.
 
 Requires `libsqlcipher` to be available as a shared library. This can be installed from AUR as `pacman -S sqlcipher`.
