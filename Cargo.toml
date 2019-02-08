@@ -8,6 +8,10 @@ description = "A cli interface to decrypting the enpass database"
 homepage = "https://github.com/norcalli/enpass-cli"
 repository = "https://github.com/norcalli/enpass-cli"
 
+[profile.release]
+lto = false
+opt-level = 3
+
 [dependencies]
 time = "0.1.40"
 rusqlcipher = { version = "0.14.9", features = ["sqlcipher"] }
@@ -16,6 +20,6 @@ serde = "1.0.75"
 serde_json = "1.0.26"
 serde_derive = "1.0.75"
 log = "0.4.4"
-env_logger = "0.5.13"
+env_logger = { version = "0.5.13", default-features = false, features = [] }
 structopt = "0.2.10"
 derive_more = "0.14.0"
